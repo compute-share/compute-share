@@ -2,8 +2,8 @@ package handlers
 
 import (
 	// "compute-share/backend/internal/db"
-	"compute-share/backend/internal/routes"
 	"compute-share/backend/internal/models"
+	"compute-share/backend/internal/routes"
 	"encoding/json"
 	// "fmt"
 	"net/http"
@@ -43,12 +43,19 @@ func JobHandler(w http.ResponseWriter, r *http.Request) {
     }
 	job.BuyerId = uid
 
-    if job.JobId == "" {
-        http.Error(w, "Invalid or missing job_id or disk_space", http.StatusBadRequest)
+    if job.ImageName == "" || job.CPULimits == "" || job.MemoryLimits == "" || job.JobName == "" {
+        http.Error(w, "Invalid or missing field", http.StatusBadRequest)
         return
     }
 	routes.AddJob(job)
 
     w.WriteHeader(http.StatusOK)
-    w.Write([]byte("Job added successfully"))
+
+	response, err := json.Marshal(map[string]string{"message": "Job added successfully"})
+	if err != nil {
+		errorMessage := "Error creating JSON response: " + err.Error()
+		http.Error(w, errorMessage, http.StatusInternalServerError)
+		return
+	}
+	w.Write(response)
 }

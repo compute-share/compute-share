@@ -20,18 +20,37 @@ func init() {
 	jobQueue = mq.GetJobQueueSingleton()
 }
 
+// CORS Middleware
+func enableCors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*") // Allow all origins
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+
 func main() {
-	http.HandleFunc("/api/add-job", handlers.JobHandler)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/add-job", handlers.JobHandler)
+
 	port := 8080
 	addr := fmt.Sprintf(":%d", port)
 
 	fmt.Printf("Server starting on port %d... \n", port)
-	// log.Fatal(http.ListenAndServe(addr, nil))
+
+	handler := enableCors(mux)
+
 	go func() {
-        if err := http.ListenAndServe(addr, nil); err != nil {
-            log.Fatalf("Failed to start HTTP server: %s", err)
-        }
-    }()
+		if err := http.ListenAndServe(addr, handler); err != nil {
+			log.Fatalf("Failed to start HTTP server: %s", err)
+		}
+	}()
 
 	defer jobQueue.Close()
 
@@ -41,12 +60,10 @@ func main() {
 		json.Unmarshal(msg, &jobRequest)
 		_, err := jobs.CreateKubernetesJob(jobRequest)
 		if err != nil {
-			log.Printf("error unmarshalling job request: %v", err)
+			log.Printf("Error creating job: %v", err)
 		} else {
-			go jobs.WatchJobCompletion(jobRequest.Namespace, jobRequest.JobName)
+			go jobs.WatchJobStatus(jobRequest.Namespace, jobRequest.JobName)
 		}
-        
-		
     }
 
     jobQueue.ConsumeMessages(messageHandler)

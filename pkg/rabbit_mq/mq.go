@@ -41,7 +41,7 @@ func GetJobQueueSingleton() *RabbitMQ {
 	failOnError(err, "Failed to open a channel")
 
 	q, err := ch.QueueDeclare(
-		"hello", // name of the queue
+		"job-queue", 
 		false,   // durable
 		false,   // delete when unused
 		false,   // exclusive

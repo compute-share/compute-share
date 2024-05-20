@@ -15,7 +15,6 @@ type Node struct {
 }
 
 type Job struct {
-	JobId          string `json:"job_id"`
 	BuyerId        string `json:"buyer_id"`
 	ImageName      string   `json:"image_name"`
 	Command        []string `json:"command"`

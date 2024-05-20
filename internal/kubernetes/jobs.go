@@ -5,7 +5,7 @@ import (
     "fmt"
     "log"
     "bufio"
-    // "time"
+    "time"
 
     batchv1 "k8s.io/api/batch/v1"
     metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,7 +13,6 @@ import (
     "k8s.io/client-go/kubernetes"
     "k8s.io/client-go/tools/clientcmd"
     "k8s.io/apimachinery/pkg/api/resource"
-
     "compute-share/backend/internal/models"
 )
 
@@ -77,7 +76,58 @@ func CreateKubernetesJob(req models.Job) (*batchv1.Job, error) {
 }
 
 // Waits for job to complete
-func WatchJobCompletion(namespace string, jobName string) {
+// func WatchJobCompletion(namespace string, jobName string) {
+//     config, err := clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
+//     if err != nil {
+//         log.Fatalf("Failed to build config: %v", err)
+//         return
+//     }
+
+//     clientset, err := kubernetes.NewForConfig(config)
+//     if err != nil {
+//         log.Fatalf("Failed to create clientset: %v", err)
+//         return
+//     }
+
+//     watcher, err := clientset.BatchV1().Jobs(namespace).Watch(context.TODO(), metav1.ListOptions{
+//         FieldSelector: fmt.Sprintf("metadata.name=%s", jobName),
+//     })
+//     if err != nil {
+//         log.Fatalf("Failed to watch job: %v", err)
+//         return
+//     }
+
+//     ch := watcher.ResultChan()
+//     log.Printf("Watching for completion of job: %s", jobName)
+//     for event := range ch {
+//         job, ok := event.Object.(*batchv1.Job)
+//         if !ok {
+//             log.Fatal("Error: Unexpected type in job watch")
+//             watcher.Stop()
+//             break
+//         }
+
+//         if job.Status.Succeeded > 0 {
+//             duration := calculateJobDuration(job)
+//             log.Printf("Job completed successfully in %d seconds", duration)
+            
+//             results := fetchJobResult(job, clientset)
+//             logResults(results)
+
+//             watcher.Stop()
+//             deleteJob(job, clientset)
+//             break
+//         }
+//         if job.Status.Failed > 0 {
+//             log.Println("Job failed")
+
+//             watcher.Stop()
+//             deleteJob(job, clientset)
+//             break
+//         }
+//     }
+// }
+func WatchJobStatus(namespace string, jobName string) {
     config, err := clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
     if err != nil {
         log.Fatalf("Failed to build config: %v", err)
@@ -108,10 +158,35 @@ func WatchJobCompletion(namespace string, jobName string) {
             break
         }
 
+        podList, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+            LabelSelector: fmt.Sprintf("job-name=%s", jobName),
+        })
+        if err != nil {
+            log.Fatalf("Failed to list pods: %v", err)
+            watcher.Stop()
+            break
+        }
+
+        for _, pod := range podList.Items {
+            for _, status := range pod.Status.ContainerStatuses {
+                if status.State.Waiting != nil {
+                    reason := status.State.Waiting.Reason
+                    log.Printf("Waiting reason: %s", reason)
+                    if reason == "ErrImagePull" || reason == "ImagePullBackOff" {
+                        log.Printf("Pod error: %s - %s", reason, status.State.Waiting.Message)
+                        log.Printf("Stopping watcher and deleting job %s", jobName)
+                        watcher.Stop()
+                        deleteJob(job, clientset)
+                        return
+                    }
+                }
+            }
+        }
+
         if job.Status.Succeeded > 0 {
             duration := calculateJobDuration(job)
             log.Printf("Job completed successfully in %d seconds", duration)
-            
+
             results := fetchJobResult(job, clientset)
             logResults(results)
 
@@ -126,8 +201,10 @@ func WatchJobCompletion(namespace string, jobName string) {
             deleteJob(job, clientset)
             break
         }
+        time.Sleep(5 * time.Second)
     }
 }
+
 
 
 //// helpers
@@ -178,7 +255,6 @@ func fetchJobResult(job *batchv1.Job, clientset *kubernetes.Clientset) []podResu
                     text: scanner.Text(),
                 }
                 results = append(results, result)
-                // log.Printf("Pod %s log: %s", pod.Name, scanner.Text())
             }
             if err := scanner.Err(); err != nil {
                 log.Printf("Error reading logs for pod %s: %v", pod.Name, err)
